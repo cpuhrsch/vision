@@ -17,19 +17,128 @@ try:
 except ImportError:
     amp = None
 
+import random
+from concurrent.futures import ProcessPoolExecutor
+from collections import deque
 
-def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, apex=False):
+executor = ProcessPoolExecutor(max_workers=16)
+
+IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+
+def _find_classes(dir):
+    if sys.version_info >= (3, 5):
+        # Faster and available in Python 3.5 and above
+        classes = [d.name for d in os.scandir(dir) if d.is_dir()]
+    else:
+        classes = [d for d in os.listdir(dir) if os.path.isdir(os.path.join(dir, d))]
+    classes.sort()
+    class_to_idx = {classes[i]: i for i in range(len(classes))}
+    return classes, class_to_idx
+
+def make_dataset(dir, class_to_idx, extensions=None, is_valid_file=None):
+    images = []
+    dir = os.path.expanduser(dir)
+    if not ((extensions is None) ^ (is_valid_file is None)):
+        raise ValueError("Both extensions and is_valid_file cannot be None or not None at the same time")
+    if extensions is not None:
+        def is_valid_file(x):
+            return x.lower().endswith(extensions)
+    for target in sorted(class_to_idx.keys()):
+        d = os.path.join(dir, target)
+        if not os.path.isdir(d):
+            continue
+        for root, _, fnames in sorted(os.walk(d)):
+            for fname in sorted(fnames):
+                path = os.path.join(root, fname)
+                if is_valid_file(path):
+                    item = (path, class_to_idx[target])
+                    images.append(item)
+
+    return images
+
+def load_image(path, target):
+    from PIL import Image
+    with open(path, 'rb') as f:
+        img = Image.open(f).convert('RGB')
+        img = transforms.Resize(256)(img)
+        img = transforms.CenterCrop(224)(img)
+        img = transforms.ToTensor()(img)
+        img = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                   std=[0.229, 0.224, 0.225])(img)
+        return img, target
+
+def train_one_epoch(model, criterion, optimizer, traindir, normalize, device, epoch, print_freq, apex=False):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
     metric_logger.add_meter('img/s', utils.SmoothedValue(window_size=10, fmt='{value}'))
 
     header = 'Epoch: [{}]'.format(epoch)
-    for image, target in metric_logger.log_every(data_loader, print_freq, header):
+
+    files = []
+    for (dirpath, dirnames, filenames) in os.walk(traindir):
+        for filename in filenames:
+            if filename.endswith('.JPEG'):
+                files.append(os.path.join(dirpath, filename))
+
+
+    classes, class_to_idx = _find_classes(traindir)
+    files = make_dataset(traindir, class_to_idx, extensions=IMG_EXTENSIONS)
+    random.shuffle(files)
+    files = iter(files)
+
+    # for i in range(100):
+    #     read_futures.append(executor.submit(load_image, files[i]))
+
+
+
+    # dataset = torchvision.datasets.ImageFolder(
+    #     traindir,
+    #     transforms.Compose([
+    #         transforms.RandomResizedCrop(224),
+    #         transforms.RandomHorizontalFlip(),
+    #         transforms.ToTensor(),
+    #         normalize,
+    #     ]))
+    # train_sampler = torch.utils.data.RandomSampler(dataset)
+    # data_loader = torch.utils.data.DataLoader(
+    #     dataset, batch_size=args.batch_size,
+    #     sampler=train_sampler, num_workers=args.workers, pin_memory=True)
+
+
+    read_futures = deque()
+    # for image, target in metric_logger.log_every(data_loader, print_freq, header):
+    while(True):
+    # for image, target in data_loader:
+
+        import time
+        t0 = time.time()
+        i = 0
+        for f in files:
+            if i < 100:
+                read_futures.append(executor.submit(load_image, f[0], f[1]))
+            else:
+                break
+            i += 1
+
+        t1 = time.time()
+        image_data = []
+        target_data = []
+        for i in range(args.batch_size):
+            image_i, target_i = read_futures.popleft().result()
+            image_data.append(image_i)
+            target_data.append(target_i)
+        image = torch.stack(image_data)
+        target = torch.tensor(target_data)
+        if image.size(0) < args.batch_size:
+            break
+
+        t2 = time.time()
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
 
+        t3 = time.time()
         start_time = time.time()
         optimizer.zero_grad()
         if apex:
@@ -39,12 +148,20 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
             loss.backward()
         optimizer.step()
 
+        t4 = time.time()
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
-        metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-        metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
-        metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
+        print('acc1: ' + str(acc1) + 
+                ' t2 - t1: ' + str(t2 - t1))
+                # ' t1: ' + str(time.time() - t1) + 
+                # ' t2: ' + str(time.time() - t2) + 
+                # ' t3: ' + str(time.time() - t3) + 
+                # ' t4: ' + str(time.time() - t4)
+                # )
+        # metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
+        # metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
+        # metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+        # metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
 
 
 def evaluate(model, criterion, data_loader, device):
@@ -106,27 +223,27 @@ def main(args):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    print("Loading training data")
-    st = time.time()
-    cache_path = _get_cache_path(traindir)
-    if args.cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
-        print("Loading dataset_train from {}".format(cache_path))
-        dataset, _ = torch.load(cache_path)
-    else:
-        dataset = torchvision.datasets.ImageFolder(
-            traindir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ]))
-        if args.cache_dataset:
-            print("Saving dataset_train to {}".format(cache_path))
-            utils.mkdir(os.path.dirname(cache_path))
-            utils.save_on_master((dataset, traindir), cache_path)
-    print("Took", time.time() - st)
+    # print("Loading training data")
+    # st = time.time()
+    # cache_path = _get_cache_path(traindir)
+    # if args.cache_dataset and os.path.exists(cache_path):
+    #     # Attention, as the transforms are also cached!
+    #     print("Loading dataset_train from {}".format(cache_path))
+    #     dataset, _ = torch.load(cache_path)
+    # else:
+    #     dataset = torchvision.datasets.ImageFolder(
+    #         traindir,
+    #         transforms.Compose([
+    #             transforms.RandomResizedCrop(224),
+    #             transforms.RandomHorizontalFlip(),
+    #             transforms.ToTensor(),
+    #             normalize,
+    #         ]))
+    #     if args.cache_dataset:
+    #         print("Saving dataset_train to {}".format(cache_path))
+    #         utils.mkdir(os.path.dirname(cache_path))
+    #         utils.save_on_master((dataset, traindir), cache_path)
+    # print("Took", time.time() - st)
 
     print("Loading validation data")
     cache_path = _get_cache_path(valdir)
@@ -148,17 +265,13 @@ def main(args):
             utils.mkdir(os.path.dirname(cache_path))
             utils.save_on_master((dataset_test, valdir), cache_path)
 
-    print("Creating data loaders")
+    # print("Creating data loaders")
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    #     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test)
     else:
-        train_sampler = torch.utils.data.RandomSampler(dataset)
+    #     train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
-
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.batch_size,
-        sampler=train_sampler, num_workers=args.workers, pin_memory=True)
 
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=args.batch_size,
@@ -203,7 +316,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args.print_freq, args.apex)
+        train_one_epoch(model, criterion, optimizer, traindir, normalize, device, epoch, args.print_freq, args.apex)
         lr_scheduler.step()
         evaluate(model, criterion, data_loader_test, device=device)
         if args.output_dir:
