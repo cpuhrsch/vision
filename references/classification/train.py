@@ -17,70 +17,86 @@ from concurrent.futures import ProcessPoolExecutor
 from collections import deque
 from PIL import Image
 
-my_transforms = [
+# Normalize uses PyTorch ops, which forces us to set OMP_NUM_THREADS to 1
+# since OpenMP can't deal with nested parallelism. This is not unique
+# to futures.
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                  std=[0.229, 0.224, 0.225])
+
+train_transforms = [
+       transforms.RandomResizedCrop(256),
+       transforms.RandomHorizontalFlip(),
+       transforms.ToTensor(),
+       normalize]
+
+valid_transforms = [
        transforms.Resize(256),
        transforms.CenterCrop(224),
        transforms.ToTensor(),
-       # Normalize uses PyTorch ops, which forces us to set OMP_NUM_THREADS to 1
-       # since OpenMP can't deal with nested parallelism. This is a separate
-       # issue and on top of that this should be executed on the GPU anyway.
-       # The main purpose of async. execution here is to hide latency
-       # and become throughput bound. Potentially also to take
-       # advantage of additional CPU resources, but that can easily be
-       # handeled asynchronously by a ProcessPoolExecutor with 1 worker
-       # which will then make use of intra-op parallelism.
-       transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])]
+       normalize]
 
-# All of these transforms can be batched and executed on the GPU
+# Most of these transforms can be batched and executed on the GPU
 # The only thing this function should do is loading and decoding
 # the image. Also note that info could be a url, a filehandle (stdin)
 # or whatever you want. It's very easy to make this work on other
 # datasources.
-def load_image(info):
-   imgs = []
-   targets = []
-   for (path, target) in info:
-       with open(path, 'rb') as f:
-           img = Image.open(f).convert('RGB')
-           for transform in my_transforms:
-               img = transform(img)
-           imgs.append(img)
-           targets.append(target)
-   return torch.stack(imgs), torch.tensor(targets)
+def train_loader(info):
+    imgs = []
+    targets = []
+    for (path, target) in info:
+        with open(path, 'rb') as f:
+            img = Image.open(f).convert('RGB')
+            for transform in train_transforms:
+                img = transform(img)
+            imgs.append(img)
+            targets.append(target)
+    return torch.stack(imgs), torch.tensor(targets)
+
+def valid_loader(info):
+    imgs = []
+    targets = []
+    for (path, target) in info:
+        with open(path, 'rb') as f:
+            img = Image.open(f).convert('RGB')
+            for transform in valid_transforms:
+                img = transform(img)
+            imgs.append(img)
+            targets.append(target)
+    return torch.stack(imgs), torch.tensor(targets)
+
+def image_paths(dir):
+    classes, class_to_idx = torchvision.datasets.find_classes(dir)
+    files = torchvision.datasets.make_dataset(dir, class_to_idx, extensions=torchvision.datasets.folder.IMG_EXTENSIONS)
+    return files
+
+# Each process assembles a batch, which means it can block on IO and suspend.
+# A good IO threadpool will anticipate this and have another worker ready
+# to step in thus hiding latency.
+def create_futures(executor, files, loader, batch_size):
+    futures = deque()
+    for file_i in range(0, len(files), batch_size):
+        f = files[file_i:file_i+batch_size]
+        futures.append(executor.submit(loader, f))
+    return futures
 
 try:
     from apex import amp
 except ImportError:
     amp = None
 
-
-def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, traindir, executor, apex=False):
-    # data with futures
-    traindir = os.path.join(args.data_path, 'train')
-    classes, class_to_idx = torchvision.datasets.DatasetFolder._find_classes(traindir)
-    files = torchvision.datasets.folder.make_dataset(traindir, class_to_idx, extensions=torchvision.datasets.folder.IMG_EXTENSIONS)
+def train_one_epoch(model, criterion, optimizer, executor, device, epoch, print_freq, apex=False):
+    files = image_paths(os.path.join(args.data_path, 'train'))
     random.shuffle(files) # torch.utils.data.RandomSampler
-    read_futures = deque()
-
+    futures = create_futures(executor, files, train_loader, args.batch_size)
 
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
     metric_logger.add_meter('img/s', utils.SmoothedValue(window_size=10, fmt='{value}'))
 
-    file_i = 0
     header = 'Epoch: [{}]'.format(epoch)
-    for image, target in metric_logger.log_every(data_loader, print_freq, header):
-        # The number of futures appended determines how much latency can be hid.
-        # Each process assembles a batch, which means it can block on IO and suspend.
-        # A good IO threadpool will anticipate this and have another worker ready
-        # to step in thus hiding latency.
-        while len(read_futures) < 40:
-            f = files[file_i:file_i+args.batch_size]
-            read_futures.append(executor.submit(load_image, f))
-            file_i += args.batch_size
-        image, target = read_futures.popleft().result()
+    for data in metric_logger.log_every(futures, print_freq, header):
+        (image, target) = data.result()
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
@@ -102,15 +118,18 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
 
 
-def evaluate(model, criterion, data_loader, device):
-    valdir = os.path.join(args.data_path, 'val')
+def evaluate(model, criterion, device):
+    files = image_paths(os.path.join(args.data_path, 'val'))
+    futures = deque()
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
     with torch.no_grad():
-        for image, target in metric_logger.log_every(data_loader, 100, header):
-            image = image.to(device, non_blocking=True)
-            target = target.to(device, non_blocking=True)
+        file_i = 0
+        for (image, target) in metric_logger.log_every(futures, 100, header):
+            file_i = append_futures(futures, files, file_i, args.batch_size)
+            image = image.result().to(device, non_blocking=True)
+            target = target.result().to(device, non_blocking=True)
             output = model(image)
             loss = criterion(output, target)
 
@@ -155,11 +174,6 @@ def main(args):
 
     torch.backends.cudnn.benchmark = True
 
-    # Data loading code
-    print("Loading data")
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
     print("Creating model")
     model = torchvision.models.__dict__[args.model](pretrained=args.pretrained)
     model.to(device)
@@ -191,18 +205,18 @@ def main(args):
         args.start_epoch = checkpoint['epoch'] + 1
 
     if args.test_only:
-        evaluate(model, criterion, data_loader_test, device=device)
+        evaluate(model, criterion, executor, device=device)
         return
 
-    executor = ProcessPoolExecutor(max_workers=args.workers)
     print("Start training")
+    executor = ProcessPoolExecutor(max_workers=args.workers)
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args.print_freq, traindir, executor, args.apex)
+        # train_one_epoch(model, criterion, optimizer, executor, device, epoch, args.print_freq, args.apex)
         lr_scheduler.step()
-        evaluate(model, criterion, data_loader_test, device=device)
+        evaluate(model, criterion, device=device)
         if args.output_dir:
             checkpoint = {
                 'model': model_without_ddp.state_dict(),
