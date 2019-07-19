@@ -1,5 +1,4 @@
 from .lsun import LSUN, LSUNClass
-from .folder import ImageFolder, DatasetFolder
 from .coco import CocoCaptions, CocoDetection
 from .cifar import CIFAR10, CIFAR100
 from .stl10 import STL10
@@ -13,12 +12,15 @@ from .sbu import SBU
 from .flickr import Flickr8k, Flickr30k
 from .voc import VOCSegmentation, VOCDetection
 from .cityscapes import Cityscapes
-from .imagenet import ImageNet
+# from .imagenet import ImageNet
 from .caltech import Caltech101, Caltech256
 from .celeba import CelebA
 from .sbd import SBDataset
 from .vision import VisionDataset
 from .usps import USPS
+# Not a good level, only added for this example
+from .folder import find_classes
+from .folder import make_dataset
 
 __all__ = ('LSUN', 'LSUNClass',
            'ImageFolder', 'DatasetFolder', 'FakeData',
