@@ -64,13 +64,13 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
 
     header = 'Epoch: [{}]'.format(epoch)
     data_loader = len(data_loader) * [(None, None)]
-    start_time = time.time()
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         image, target = read_futures.popleft().result()
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
 
+        start_time = time.time()
         optimizer.zero_grad()
         if apex:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -90,7 +90,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
             f = files[file_i:file_i+args.batch_size]
             read_futures.append(executor.submit(load_image, f))
             file_i += args.batch_size
-        start_time = time.time()
 
 
 def evaluate(model, criterion, data_loader, device):
