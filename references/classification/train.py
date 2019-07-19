@@ -12,20 +12,93 @@ from torchvision import transforms
 
 import utils
 
+import random
+from concurrent.futures import ProcessPoolExecutor
+from collections import deque
+
+executor = ProcessPoolExecutor(max_workers=20)
+
+IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+
+def _find_classes(dir):
+   if sys.version_info >= (3, 5):
+       # Faster and available in Python 3.5 and above
+       classes = [d.name for d in os.scandir(dir) if d.is_dir()]
+   else:
+       classes = [d for d in os.listdir(dir) if os.path.isdir(os.path.join(dir, d))]
+   classes.sort()
+   class_to_idx = {classes[i]: i for i in range(len(classes))}
+   return classes, class_to_idx
+
+def make_dataset(dir, class_to_idx, extensions=None, is_valid_file=None):
+   images = []
+   dir = os.path.expanduser(dir)
+   if not ((extensions is None) ^ (is_valid_file is None)):
+       raise ValueError("Both extensions and is_valid_file cannot be None or not None at the same time")
+   if extensions is not None:
+       def is_valid_file(x):
+           return x.lower().endswith(extensions)
+   for target in sorted(class_to_idx.keys()):
+       d = os.path.join(dir, target)
+       if not os.path.isdir(d):
+           continue
+       for root, _, fnames in sorted(os.walk(d)):
+           for fname in sorted(fnames):
+               path = os.path.join(root, fname)
+               if is_valid_file(path):
+                   item = (path, class_to_idx[target])
+                   images.append(item)
+   return images
+
+my_transforms = [
+       transforms.Resize(256),
+       transforms.CenterCrop(224),
+       transforms.ToTensor(),
+       transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])]
+
+def load_image(info):
+   from PIL import Image
+   imgs = []
+   targets = []
+   for i in range(len(info)):
+       path, target = info[0]
+       with open(path, 'rb') as f:
+           img = Image.open(f).convert('RGB')
+           for transform in my_transforms:
+               img = transform(img)
+           imgs.append(img)
+           targets.append(target)
+   return torch.stack(imgs), torch.tensor(targets)
+
 try:
     from apex import amp
 except ImportError:
     amp = None
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, apex=False):
+def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, traindir, apex=False):
+    # data with futures
+    classes, class_to_idx = _find_classes(traindir)
+    files = make_dataset(traindir, class_to_idx, extensions=IMG_EXTENSIONS)
+    random.shuffle(files)
+    read_futures = deque()
+
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
     metric_logger.add_meter('img/s', utils.SmoothedValue(window_size=10, fmt='{value}'))
 
+    file_i = 0
+    while len(read_futures) < 40:
+        f = files[file_i:file_i+args.batch_size]
+        read_futures.append(executor.submit(load_image, f))
+        file_i += args.batch_size
+
     header = 'Epoch: [{}]'.format(epoch)
+    data_loader = len(data_loader) * [(None, None)]
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
+        image, target = read_futures.popleft().result()
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
@@ -45,6 +118,10 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
+
+        f = files[file_i:file_i+args.batch_size]
+        read_futures.append(executor.submit(load_image, f))
+        file_i += args.batch_size
 
 
 def evaluate(model, criterion, data_loader, device):
@@ -203,7 +280,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args.print_freq, args.apex)
+        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args.print_freq, traindir, args.apex)
         lr_scheduler.step()
         evaluate(model, criterion, data_loader_test, device=device)
         if args.output_dir:
