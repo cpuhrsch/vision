@@ -56,16 +56,26 @@ def make_dataset(dir, class_to_idx, extensions=None, is_valid_file=None):
 
     return images
 
-def load_image(path, target):
+my_transforms = [
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])]
+
+def load_image(info):
     from PIL import Image
-    with open(path, 'rb') as f:
-        img = Image.open(f).convert('RGB')
-        img = transforms.Resize(256)(img)
-        img = transforms.CenterCrop(224)(img)
-        img = transforms.ToTensor()(img)
-        img = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])(img)
-        return img, target
+    imgs = []
+    targets = []
+    for i in range(len(info)):
+        path, target = info[0]
+        with open(path, 'rb') as f:
+            img = Image.open(f).convert('RGB')
+            for transform in my_transforms:
+                img = transform(img)
+            imgs.append(img)
+            targets.append(target)
+    return torch.stack(imgs), torch.tensor(targets)
 
 def train_one_epoch(model, criterion, optimizer, traindir, normalize, device, epoch, print_freq, apex=False):
     model.train()
@@ -85,60 +95,70 @@ def train_one_epoch(model, criterion, optimizer, traindir, normalize, device, ep
     classes, class_to_idx = _find_classes(traindir)
     files = make_dataset(traindir, class_to_idx, extensions=IMG_EXTENSIONS)
     random.shuffle(files)
-    files = iter(files)
 
     # for i in range(100):
     #     read_futures.append(executor.submit(load_image, files[i]))
 
 
 
-    # dataset = torchvision.datasets.ImageFolder(
-    #     traindir,
-    #     transforms.Compose([
-    #         transforms.RandomResizedCrop(224),
-    #         transforms.RandomHorizontalFlip(),
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ]))
-    # train_sampler = torch.utils.data.RandomSampler(dataset)
-    # data_loader = torch.utils.data.DataLoader(
-    #     dataset, batch_size=args.batch_size,
-    #     sampler=train_sampler, num_workers=args.workers, pin_memory=True)
 
 
     read_futures = deque()
+    import time
     # for image, target in metric_logger.log_every(data_loader, print_freq, header):
-    while(True):
+
+    print("started loading futures")
+    t0 = time.time()
     # for image, target in data_loader:
-
-        import time
-        t0 = time.time()
-        i = 0
-        for f in files:
-            if i < 100:
-                read_futures.append(executor.submit(load_image, f[0], f[1]))
-            else:
-                break
-            i += 1
-
+    file_i = 0
+    bum_bachtes = 100
+    while len(read_futures) < 40:
+        f = files[file_i:file_i+args.batch_size]
+        read_futures.append(executor.submit(load_image, f))
+        file_i += args.batch_size
+    for _ in range(bum_bachtes):
+        # print("sleeping")
+        # time.sleep(10)
+        # print("woke up")
         t1 = time.time()
-        image_data = []
-        target_data = []
-        for i in range(args.batch_size):
-            image_i, target_i = read_futures.popleft().result()
-            image_data.append(image_i)
-            target_data.append(target_i)
-        image = torch.stack(image_data)
-        target = torch.tensor(target_data)
-        if image.size(0) < args.batch_size:
-            break
+        image, target = read_futures.popleft().result()
+        # image, target = image.to(device), target.to(device)
+        f = files[file_i:file_i+args.batch_size]
+        read_futures.append(executor.submit(load_image, f))
+        file_i += args.batch_size
+        print(time.time() - t1)
+    print(str(bum_bachtes) + " batches t0: " + str(time.time() - t0))
 
-        t2 = time.time()
-        image, target = image.to(device), target.to(device)
+    dataset = torchvision.datasets.ImageFolder(
+        traindir,
+        transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ]))
+    train_sampler = torch.utils.data.RandomSampler(dataset)
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.batch_size,
+        sampler=train_sampler, num_workers=args.workers, pin_memory=True)
+
+    print("started using dataloader")
+    t1 = time.time()
+    ii = 0
+    for image, target in data_loader:
+        if ii == bum_bachtes:
+            break
+        # image, target = image.to(device), target.to(device)
+        ii += 1
+    print(str(bum_bachtes) + " batches t1: " + str(time.time() - t1))
+    import sys
+    sys.exit(1)
+
+
+    while(False):
         output = model(image)
         loss = criterion(output, target)
 
-        t3 = time.time()
         start_time = time.time()
         optimizer.zero_grad()
         if apex:
@@ -148,20 +168,13 @@ def train_one_epoch(model, criterion, optimizer, traindir, normalize, device, ep
             loss.backward()
         optimizer.step()
 
-        t4 = time.time()
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
-        print('acc1: ' + str(acc1) + 
-                ' t2 - t1: ' + str(t2 - t1))
-                # ' t1: ' + str(time.time() - t1) + 
-                # ' t2: ' + str(time.time() - t2) + 
-                # ' t3: ' + str(time.time() - t3) + 
-                # ' t4: ' + str(time.time() - t4)
-                # )
         # metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
         # metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         # metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         # metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
+        print(time.time() - t0)
 
 
 def evaluate(model, criterion, data_loader, device):
@@ -273,9 +286,9 @@ def main(args):
     #     train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=args.batch_size,
-        sampler=test_sampler, num_workers=args.workers, pin_memory=True)
+    # data_loader_test = torch.utils.data.DataLoader(
+    #     dataset_test, batch_size=args.batch_size,
+    #     sampler=test_sampler, num_workers=args.workers, pin_memory=True)
 
     print("Creating model")
     model = torchvision.models.__dict__[args.model](pretrained=args.pretrained)
