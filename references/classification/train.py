@@ -47,7 +47,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
     # data with futures
     classes, class_to_idx = torchvision.datasets.DatasetFolder._find_classes(traindir)
     files = torchvision.datasets.folder.make_dataset(traindir, class_to_idx, extensions=torchvision.datasets.folder.IMG_EXTENSIONS)
-    random.shuffle(files)
+    random.shuffle(files) # torch.utils.data.RandomSampler
     read_futures = deque()
 
 
