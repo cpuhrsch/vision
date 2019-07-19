@@ -69,17 +69,16 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
     metric_logger.add_meter('img/s', utils.SmoothedValue(window_size=10, fmt='{value}'))
 
     file_i = 0
-    # The number of futures appended determines how much latency can be hid.
-    # Each process assembles a batch, which means it can block on IO and suspend.
-    # A good IO threadpool will anticipate this and have another worker ready
-    # to step in thus hiding latency.
-    while len(read_futures) < 40:
-        f = files[file_i:file_i+args.batch_size]
-        read_futures.append(executor.submit(load_image, f))
-        file_i += args.batch_size
-
     header = 'Epoch: [{}]'.format(epoch)
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
+        # The number of futures appended determines how much latency can be hid.
+        # Each process assembles a batch, which means it can block on IO and suspend.
+        # A good IO threadpool will anticipate this and have another worker ready
+        # to step in thus hiding latency.
+        while len(read_futures) < 40:
+            f = files[file_i:file_i+args.batch_size]
+            read_futures.append(executor.submit(load_image, f))
+            file_i += args.batch_size
         image, target = read_futures.popleft().result()
         image, target = image.to(device), target.to(device)
         output = model(image)
@@ -100,11 +99,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
-
-        while len(read_futures) < 40:
-            f = files[file_i:file_i+args.batch_size]
-            read_futures.append(executor.submit(load_image, f))
-            file_i += args.batch_size
 
 
 def evaluate(model, criterion, data_loader, device):
