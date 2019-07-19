@@ -16,38 +16,6 @@ import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import deque
 
-IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
-
-def _find_classes(dir):
-   if sys.version_info >= (3, 5):
-       # Faster and available in Python 3.5 and above
-       classes = [d.name for d in os.scandir(dir) if d.is_dir()]
-   else:
-       classes = [d for d in os.listdir(dir) if os.path.isdir(os.path.join(dir, d))]
-   classes.sort()
-   class_to_idx = {classes[i]: i for i in range(len(classes))}
-   return classes, class_to_idx
-
-def make_dataset(dir, class_to_idx, extensions=None, is_valid_file=None):
-   images = []
-   dir = os.path.expanduser(dir)
-   if not ((extensions is None) ^ (is_valid_file is None)):
-       raise ValueError("Both extensions and is_valid_file cannot be None or not None at the same time")
-   if extensions is not None:
-       def is_valid_file(x):
-           return x.lower().endswith(extensions)
-   for target in sorted(class_to_idx.keys()):
-       d = os.path.join(dir, target)
-       if not os.path.isdir(d):
-           continue
-       for root, _, fnames in sorted(os.walk(d)):
-           for fname in sorted(fnames):
-               path = os.path.join(root, fname)
-               if is_valid_file(path):
-                   item = (path, class_to_idx[target])
-                   images.append(item)
-   return images
-
 my_transforms = [
        transforms.Resize(256),
        transforms.CenterCrop(224),
@@ -77,8 +45,8 @@ except ImportError:
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, traindir, executor, apex=False):
     # data with futures
-    classes, class_to_idx = _find_classes(traindir)
-    files = make_dataset(traindir, class_to_idx, extensions=IMG_EXTENSIONS)
+    classes, class_to_idx = torchvision.datasets.DatasetFolder._find_classes(traindir)
+    files = torchvision.datasets.folder.make_dataset(traindir, class_to_idx, extensions=torchvision.datasets.folder.IMG_EXTENSIONS)
     random.shuffle(files)
     read_futures = deque()
 
@@ -194,12 +162,7 @@ def main(args):
     else:
         dataset = torchvision.datasets.ImageFolder(
             traindir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ]))
+            my_transforms)
         if args.cache_dataset:
             print("Saving dataset_train to {}".format(cache_path))
             utils.mkdir(os.path.dirname(cache_path))

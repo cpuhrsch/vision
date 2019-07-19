@@ -90,7 +90,7 @@ class DatasetFolder(VisionDataset):
         super(DatasetFolder, self).__init__(root)
         self.transform = transform
         self.target_transform = target_transform
-        classes, class_to_idx = self._find_classes(self.root)
+        classes, class_to_idx = DatasetFolder._find_classes(self.root)
         samples = make_dataset(self.root, class_to_idx, extensions, is_valid_file)
         if len(samples) == 0:
             raise (RuntimeError("Found 0 files in subfolders of: " + self.root + "\n"
@@ -104,7 +104,8 @@ class DatasetFolder(VisionDataset):
         self.samples = samples
         self.targets = [s[1] for s in samples]
 
-    def _find_classes(self, dir):
+    @staticmethod
+    def _find_classes(dir):
         """
         Finds the class folders in a dataset.
 
