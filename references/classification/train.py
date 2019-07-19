@@ -21,7 +21,7 @@ import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import deque
 
-executor = ProcessPoolExecutor(max_workers=16)
+executor = ProcessPoolExecutor(max_workers=20)
 
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
 
@@ -122,6 +122,7 @@ def train_one_epoch(model, criterion, optimizer, traindir, normalize, device, ep
         # print("woke up")
         t1 = time.time()
         image, target = read_futures.popleft().result()
+        image, target = image.to(device), target.to(device)
         # image, target = image.to(device), target.to(device)
         f = files[file_i:file_i+args.batch_size]
         read_futures.append(executor.submit(load_image, f))
@@ -148,7 +149,7 @@ def train_one_epoch(model, criterion, optimizer, traindir, normalize, device, ep
     for image, target in data_loader:
         if ii == bum_bachtes:
             break
-        # image, target = image.to(device), target.to(device)
+        image, target = image.to(device), target.to(device)
         ii += 1
     print(str(bum_bachtes) + " batches t1: " + str(time.time() - t1))
     import sys
@@ -361,8 +362,8 @@ def parse_args():
     parser.add_argument('-b', '--batch-size', default=32, type=int)
     parser.add_argument('--epochs', default=90, type=int, metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
-                        help='number of data loading workers (default: 16)')
+    parser.add_argument('-j', '--workers', default=20, type=int, metavar='N',
+                        help='number of data loading workers (default: 20)')
     parser.add_argument('--lr', default=0.1, type=float, help='initial learning rate')
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
