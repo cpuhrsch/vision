@@ -118,18 +118,19 @@ def train_one_epoch(model, criterion, optimizer, executor, device, epoch, print_
         metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
 
 
-def evaluate(model, criterion, device):
+def evaluate(model, criterion, executor, device):
     files = image_paths(os.path.join(args.data_path, 'val'))
     futures = deque()
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
     with torch.no_grad():
-        file_i = 0
-        for (image, target) in metric_logger.log_every(futures, 100, header):
-            file_i = append_futures(futures, files, file_i, args.batch_size)
-            image = image.result().to(device, non_blocking=True)
-            target = target.result().to(device, non_blocking=True)
+        files = image_paths(os.path.join(args.data_path, 'val'))
+        futures = create_futures(executor, files, valid_loader, args.batch_size)
+        for data in metric_logger.log_every(futures, 100, header):
+            (image, target) = data.result()
+            image = image.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
             output = model(image)
             loss = criterion(output, target)
 
@@ -144,8 +145,8 @@ def evaluate(model, criterion, device):
     metric_logger.synchronize_between_processes()
 
     print(' * Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f}'
-          .format(top1=metric_logger.acc1, top5=metric_logger.acc5))
-    return metric_logger.acc1.global_avg
+          .format(top1=metric_logger.meters['acc1'].global_avg, top5=metric_logger.meters['acc5'].global_avg))
+    return metric_logger.meters['acc1'].global_avg
 
 
 def _get_cache_path(filepath):
@@ -214,9 +215,9 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        # train_one_epoch(model, criterion, optimizer, executor, device, epoch, args.print_freq, args.apex)
+        train_one_epoch(model, criterion, optimizer, executor, device, epoch, args.print_freq, args.apex)
         lr_scheduler.step()
-        evaluate(model, criterion, device=device)
+        evaluate(model, criterion, executor, device=device)
         if args.output_dir:
             checkpoint = {
                 'model': model_without_ddp.state_dict(),
