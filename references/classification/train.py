@@ -15,20 +15,32 @@ import utils
 import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import deque
+from PIL import Image
 
 my_transforms = [
        transforms.Resize(256),
        transforms.CenterCrop(224),
        transforms.ToTensor(),
+       # Normalize uses PyTorch ops, which forces us to set OMP_NUM_THREADS to 1
+       # since OpenMP can't deal with nested parallelism. This is a separate
+       # issue and on top of that this should be executed on the GPU anyway.
+       # The main purpose of async. execution here is to hide latency
+       # and become throughput bound. Potentially also to take
+       # advantage of additional CPU resources, but that can easily be
+       # handeled asynchronously by a ProcessPoolExecutor with 1 worker
+       # which will then make use of intra-op parallelism.
        transforms.Normalize(mean=[0.485, 0.456, 0.406],
                             std=[0.229, 0.224, 0.225])]
 
+# All of these transforms can be batched and executed on the GPU
+# The only thing this function should do is loading and decoding
+# the image. Also note that info could be a url, a filehandle (stdin)
+# or whatever you want. It's very easy to make this work on other
+# datasources.
 def load_image(info):
-   from PIL import Image
    imgs = []
    targets = []
-   for i in range(len(info)):
-       path, target = info[0]
+   for (path, target) in info:
        with open(path, 'rb') as f:
            img = Image.open(f).convert('RGB')
            for transform in my_transforms:
@@ -57,13 +69,16 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
     metric_logger.add_meter('img/s', utils.SmoothedValue(window_size=10, fmt='{value}'))
 
     file_i = 0
+    # The number of futures appended determines how much latency can be hid.
+    # Each process assembles a batch, which means it can block on IO and suspend.
+    # A good IO threadpool will anticipate this and have another worker ready
+    # to step in thus hiding latency.
     while len(read_futures) < 40:
         f = files[file_i:file_i+args.batch_size]
         read_futures.append(executor.submit(load_image, f))
         file_i += args.batch_size
 
     header = 'Epoch: [{}]'.format(epoch)
-    data_loader = len(data_loader) * [(None, None)]
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         image, target = read_futures.popleft().result()
         image, target = image.to(device), target.to(device)
