@@ -16,8 +16,6 @@ import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import deque
 
-executor = ProcessPoolExecutor(max_workers=20)
-
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
 
 def _find_classes(dir):
@@ -77,12 +75,13 @@ except ImportError:
     amp = None
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, traindir, apex=False):
+def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, print_freq, traindir, executor, apex=False):
     # data with futures
     classes, class_to_idx = _find_classes(traindir)
     files = make_dataset(traindir, class_to_idx, extensions=IMG_EXTENSIONS)
     random.shuffle(files)
     read_futures = deque()
+
 
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -97,13 +96,13 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
 
     header = 'Epoch: [{}]'.format(epoch)
     data_loader = len(data_loader) * [(None, None)]
+    start_time = time.time()
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         image, target = read_futures.popleft().result()
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
 
-        start_time = time.time()
         optimizer.zero_grad()
         if apex:
             with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -119,9 +118,11 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, pri
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         metric_logger.meters['img/s'].update(batch_size / (time.time() - start_time))
 
-        f = files[file_i:file_i+args.batch_size]
-        read_futures.append(executor.submit(load_image, f))
-        file_i += args.batch_size
+        while len(read_futures) < 40:
+            f = files[file_i:file_i+args.batch_size]
+            read_futures.append(executor.submit(load_image, f))
+            file_i += args.batch_size
+        start_time = time.time()
 
 
 def evaluate(model, criterion, data_loader, device):
@@ -236,6 +237,7 @@ def main(args):
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size,
         sampler=train_sampler, num_workers=args.workers, pin_memory=True)
+    data_loader = len(data_loader) * [(None, None)]
 
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=args.batch_size,
@@ -275,12 +277,13 @@ def main(args):
         evaluate(model, criterion, data_loader_test, device=device)
         return
 
+    executor = ProcessPoolExecutor(max_workers=args.workers)
     print("Start training")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args.print_freq, traindir, args.apex)
+        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args.print_freq, traindir, executor, args.apex)
         lr_scheduler.step()
         evaluate(model, criterion, data_loader_test, device=device)
         if args.output_dir:
