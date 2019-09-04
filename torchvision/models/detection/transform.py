@@ -44,7 +44,6 @@ class GeneralizedRCNNTransform(nn.Module):
                 targets[i] = target
 
         image_sizes = [img.shape[-2:] for img in images]
-        images = self.batch_images(images)
         image_list = ImageList(images, image_sizes)
         return image_list, targets
 

@@ -33,6 +33,7 @@ class Conv2d(torch.nn.Conv2d):
     This will eventually be supported natively by PyTorch, and this
     class can go away.
     """
+
     def forward(self, x):
         if x.numel() > 0:
             return super(Conv2d, self).forward(x)
@@ -54,6 +55,7 @@ class ConvTranspose2d(torch.nn.ConvTranspose2d):
     This will eventually be supported natively by PyTorch, and this
     class can go away.
     """
+
     def forward(self, x):
         if x.numel() > 0:
             return super(ConvTranspose2d, self).forward(x)
@@ -80,6 +82,7 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
     This will eventually be supported natively by PyTorch, and this
     class can go away.
     """
+
     def forward(self, x):
         if x.numel() > 0:
             return super(BatchNorm2d, self).forward(x)
@@ -132,7 +135,7 @@ def interpolate(
 
 
 # This is not in nn
-class FrozenBatchNorm2d(torch.jit.ScriptModule):
+class FrozenBatchNorm2d(torch.nn.Module):
     """
     BatchNorm2d where the batch statistics and the affine parameters
     are fixed
@@ -145,7 +148,6 @@ class FrozenBatchNorm2d(torch.jit.ScriptModule):
         self.register_buffer("running_mean", torch.zeros(n))
         self.register_buffer("running_var", torch.ones(n))
 
-    @torch.jit.script_method
     def forward(self, x):
         # move reshapes to the beginning
         # to make it fuser-friendly

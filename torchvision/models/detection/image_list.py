@@ -3,6 +3,9 @@ from __future__ import division
 
 import torch
 
+import nestedtensor
+torch = nestedtensor.nested.monkey_patch(torch)
+
 
 class ImageList(object):
     """
@@ -18,7 +21,7 @@ class ImageList(object):
             tensors (tensor)
             image_sizes (list[tuple[int, int]])
         """
-        self.tensors = tensors
+        self.tensors = torch.nested_tensor(tensors)
         self.image_sizes = image_sizes
 
     def to(self, *args, **kwargs):
