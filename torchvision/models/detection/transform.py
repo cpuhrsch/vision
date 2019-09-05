@@ -44,7 +44,10 @@ class GeneralizedRCNNTransform(nn.Module):
                 targets[i] = target
 
         image_sizes = [img.shape[-2:] for img in images]
-        image_list = ImageList(images, image_sizes)
+        batched_images = self.batch_images(images)
+        # import pdb
+        # pdb.set_trace()
+        image_list = ImageList(images, image_sizes, batched_images)
         return image_list, targets
 
     def normalize(self, image):

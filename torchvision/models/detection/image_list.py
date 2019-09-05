@@ -15,15 +15,19 @@ class ImageList(object):
     and storing in a field the original sizes of each image
     """
 
-    def __init__(self, tensors, image_sizes):
+    def __init__(self, tensors, image_sizes, batched_images):
         """
         Arguments:
             tensors (tensor)
             image_sizes (list[tuple[int, int]])
         """
+        if self.tensors.dim() - self.tensors.nested_dim() != 3:
+            import pdb
+            pdb.set_trace()
         self.tensors = torch.nested_tensor(tensors)
+        self.batched_images = batched_images
         self.image_sizes = image_sizes
 
     def to(self, *args, **kwargs):
         cast_tensor = self.tensors.to(*args, **kwargs)
-        return ImageList(cast_tensor, self.image_sizes)
+        return ImageList(cast_tensor, self.image_sizes, self.batched_images)

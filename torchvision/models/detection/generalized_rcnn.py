@@ -28,7 +28,7 @@ class GeneralizedRCNN(nn.Module):
         self.rpn = rpn
         self.roi_heads = roi_heads
 
-    def forward(self, images, targets=None):
+    def forward(self, images_, targets_=None):
         """
         Arguments:
             images (list[Tensor]): images to be processed
@@ -41,10 +41,12 @@ class GeneralizedRCNN(nn.Module):
                 like `scores`, `labels` and `mask` (for Mask R-CNN models).
 
         """
-        if self.training and targets is None:
+        if self.training and targets_ is None:
             raise ValueError("In training mode, targets should be passed")
-        original_image_sizes = [img.shape[-2:] for img in images]
-        images, targets = self.transform(images, targets)
+        original_image_sizes = [img.shape[-2:] for img in images_]
+        # import pdb
+        # pdb.set_trace()
+        images, targets = self.transform(images_, targets_)
         features = self.backbone(images.tensors)
         if isinstance(features, torch.Tensor):
             features = OrderedDict([(0, features)])
