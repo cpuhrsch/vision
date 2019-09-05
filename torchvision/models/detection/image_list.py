@@ -21,10 +21,10 @@ class ImageList(object):
             tensors (tensor)
             image_sizes (list[tuple[int, int]])
         """
+        self.tensors = torch.nested_tensor(tensors)
         if self.tensors.dim() - self.tensors.nested_dim() != 3:
             import pdb
             pdb.set_trace()
-        self.tensors = torch.nested_tensor(tensors)
         self.batched_images = batched_images
         self.image_sizes = image_sizes
 

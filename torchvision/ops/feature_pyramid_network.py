@@ -89,7 +89,9 @@ class FeaturePyramidNetwork(nn.Module):
             if not inner_block:
                 continue
             inner_lateral = inner_block(feature)
-            feat_shape = inner_lateral.shape[-2:]
+            # feat_shape = inner_lateral.shape[-2:]
+            feat_shape = tuple(zip(
+                inner_lateral.nested_size(2), inner_lateral.nested_size(3)))
             inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
             last_inner = inner_lateral + inner_top_down
             results.insert(0, layer_block(last_inner))
@@ -118,6 +120,7 @@ class ExtraFPNBlock(nn.Module):
             of the FPN
         names (List[str]): the extended set of names for the results
     """
+
     def forward(self, results, x, names):
         pass
 
@@ -126,6 +129,7 @@ class LastLevelMaxPool(ExtraFPNBlock):
     """
     Applies a max_pool2d on top of the last feature map
     """
+
     def forward(self, x, y, names):
         names.append("pool")
         x.append(F.max_pool2d(x[-1], 1, 2, 0))
@@ -136,6 +140,7 @@ class LastLevelP6P7(ExtraFPNBlock):
     """
     This module is used in RetinaNet to generate extra layers, P6 and P7.
     """
+
     def __init__(self, in_channels, out_channels):
         super(LastLevelP6P7, self).__init__()
         self.p6 = nn.Conv2d(in_channels, out_channels, 3, 2, 1)
