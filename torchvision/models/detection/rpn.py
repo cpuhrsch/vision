@@ -106,14 +106,18 @@ class AnchorGenerator(nn.Module):
         key = tuple(grid_sizes) + tuple(strides)
         if key in self._cache:
             return self._cache[key]
-        anchors = self.grid_anchors(grid_sizes, strides)
+        # anchors = self.grid_anchors(grid_sizes, strides)
+        anchors = tuple(self.grid_anchors(g, s) for (g, s) in zip(grid_sizes.unbind(), strides.unbind()))
         self._cache[key] = anchors
         return anchors
 
     def forward(self, image_list, feature_maps):
-        grid_sizes = tuple([feature_map.shape[-2:] for feature_map in feature_maps])
-        image_size = image_list.tensors.shape[-2:]
-        strides = tuple((image_size[0] / g[0], image_size[1] / g[1]) for g in grid_sizes)
+        # grid_sizes = tuple([feature_map.shape[-2:] for feature_map in feature_maps])
+        grid_sizes = torch.nested_tensor(tuple(feature_map.nested_size((1, 2))
+                                               for feature_map in feature_maps)).to_tensor(2)
+        image_sizes = torch.nested_tensor(image_list.tensors.nested_size((2, 3))).to_tensor(1)
+        # image_size = image_list.tensors.shape[-2:]
+        strides = torch.nested_tensor(tuple(image_sizes.div(g) for g in grid_sizes))
         self.set_cell_anchors(feature_maps[0].device)
         anchors_over_all_feature_maps = self.cached_grid_anchors(grid_sizes, strides)
         anchors = []
@@ -122,8 +126,13 @@ class AnchorGenerator(nn.Module):
             for anchors_per_feature_map in anchors_over_all_feature_maps:
                 anchors_in_image.append(anchors_per_feature_map)
             anchors.append(anchors_in_image)
-        anchors = [torch.cat(anchors_per_image) for anchors_per_image in anchors]
-        return anchors
+        result = torch.nested_tensor(anchors)
+        tensor, mask = result.to_tensor_mask()
+        import pdb
+        pdb.set_trace()
+        return result
+        # anchors = [torch.cat(anchors_per_image) for anchors_per_image in anchors]
+        # return anchors
 
 
 class RPNHead(nn.Module):
@@ -159,42 +168,55 @@ class RPNHead(nn.Module):
         return logits, bbox_reg
 
 
-def permute_and_flatten(layer, N, A, C, H, W):
-    layer = layer.view(N, -1, C, H, W)
-    layer = layer.permute(0, 3, 4, 1, 2)
-    layer = layer.reshape(N, -1, C)
+def permute_and_flatten(layer, A, C, H, W):
+    layer = layer.view(-1, C, H, W)
+    layer = layer.permute(2, 3, 0, 1)
+    layer = layer.reshape(-1, C)
     return layer
 
 
 def concat_box_prediction_layers(box_cls, box_regression):
     box_cls_flattened = []
     box_regression_flattened = []
-    # for each feature level, permute the outputs to make them be in the
-    # same format as the labels. Note that the labels are computed for
-    # all feature levels concatenated, so we keep the same representation
-    # for the objectness and the box_regression
-    for box_cls_per_level, box_regression_per_level in zip(
-        box_cls, box_regression
-    ):
-        N, AxC, H, W = box_cls_per_level.shape
-        Ax4 = box_regression_per_level.shape[1]
+
+    def _apply(box_cls_per_level, box_regression_per_level):
+        # for each feature level, permute the outputs to make them be in the
+        # same format as the labels. Note that the labels are computed for
+        # all feature levels concatenated, so we keep the same representation
+        # for the objectness and the box_regression
+        # for box_cls_per_level, box_regression_per_level in zip(
+        #     box_cls, box_regression
+        # ):
+        AxC, H, W = box_cls_per_level.shape
+        Ax4 = box_regression_per_level.shape[0]
         A = Ax4 // 4
         C = AxC // A
         box_cls_per_level = permute_and_flatten(
-            box_cls_per_level, N, A, C, H, W
+            box_cls_per_level, A, C, H, W
         )
-        box_cls_flattened.append(box_cls_per_level)
-
         box_regression_per_level = permute_and_flatten(
-            box_regression_per_level, N, A, 4, H, W
+            box_regression_per_level, A, 4, H, W
         )
-        box_regression_flattened.append(box_regression_per_level)
-    # concatenate on the first dimension (representing the feature levels), to
-    # take into account the way the labels were generated (with all feature maps
-    # being concatenated as well)
-    box_cls = torch.cat(box_cls_flattened, dim=1).reshape(-1, C)
-    box_regression = torch.cat(box_regression_flattened, dim=1).reshape(-1, 4)
-    return box_cls, box_regression
+        return box_cls_per_level, box_regression_per_level
+    results1 = []
+    results2 = []
+    for (bc, br) in zip(box_cls, box_regression):
+        result1 = []
+        result2 = []
+        for (b, r) in zip(bc.unbind(), br.unbind()):
+            r1, r2 = _apply(b, r)
+            result1.append(r1)
+            result2.append(r2)
+        results1.append(result1)
+        results2.append(result2)
+    return torch.nested_tensor(results1), torch.nested_tensor(results2)
+
+    # # concatenate on the first dimension (representing the feature levels), to
+    # # take into account the way the labels were generated (with all feature maps
+    # # being concatenated as well)
+    # box_cls = torch.cat(box_cls_flattened, dim=1).reshape(-1, C)
+    # box_regression = torch.cat(box_regression_flattened, dim=1).reshape(-1, 4)
+    # return box_cls, box_regression
 
 
 class RegionProposalNetwork(torch.nn.Module):
