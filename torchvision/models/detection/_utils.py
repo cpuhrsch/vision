@@ -157,10 +157,10 @@ class BoxCoder(object):
         return targets
 
     def decode(self, rel_codes, boxes):
-        assert isinstance(boxes, (list, tuple))
-        if isinstance(rel_codes, (list, tuple)):
-            rel_codes = torch.cat(rel_codes, dim=0)
-        assert isinstance(rel_codes, torch.Tensor)
+        # assert isinstance(boxes, (list, tuple))
+        # if isinstance(rel_codes, (list, tuple)):
+        #     rel_codes = torch.cat(rel_codes, dim=0)
+        # assert isinstance(rel_codes, torch.Tensor)
         boxes_per_image = [len(b) for b in boxes]
         concat_boxes = torch.cat(boxes, dim=0)
         pred_boxes = self.decode_single(

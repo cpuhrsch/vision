@@ -113,7 +113,7 @@ class AnchorGenerator(nn.Module):
 
     def forward(self, image_list, feature_maps):
         # grid_sizes = tuple([feature_map.shape[-2:] for feature_map in feature_maps])
-        grid_sizes = torch.nested_tensor(tuple(feature_map.nested_size((1, 2))
+        grid_sizes = torch.nested_tensor(tuple(feature_map.nested_size((2, 3))
                                                for feature_map in feature_maps)).to_tensor(2)
         image_sizes = torch.nested_tensor(image_list.tensors.nested_size((2, 3))).to_tensor(1)
         # image_size = image_list.tensors.shape[-2:]
@@ -127,12 +127,7 @@ class AnchorGenerator(nn.Module):
                 anchors_in_image.append(anchors_per_feature_map)
             anchors.append(anchors_in_image)
         result = torch.nested_tensor(anchors)
-        tensor, mask = result.to_tensor_mask()
-        import pdb
-        pdb.set_trace()
         return result
-        # anchors = [torch.cat(anchors_per_image) for anchors_per_image in anchors]
-        # return anchors
 
 
 class RPNHead(nn.Module):
