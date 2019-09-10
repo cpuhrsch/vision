@@ -29,15 +29,13 @@ roi_pooler = torchvision.ops.MultiScaleRoIAlign(featmap_names=[0],
                                                 output_size=7,
                                                 sampling_ratio=2)
 
-mask_roi_pooler = torchvision.ops.MultiScaleRoIAlign(featmap_names=[0],
-                                                     output_size=14,
-                                                     sampling_ratio=2)
 # put the pieces together inside a FasterRCNN model
-model = MaskRCNN(backbone,
-                 num_classes=2,
-                 rpn_anchor_generator=anchor_generator,
-                 box_roi_pool=roi_pooler,
-                 mask_roi_pool=mask_roi_pooler)
+model = FasterRCNN(backbone,
+                   num_classes=2,
+                   rpn_anchor_generator=anchor_generator,
+                   box_roi_pool=roi_pooler)
+# NOTE: This is inference only.
+# NOTE: FasterRCNN skips even more complexity
 model.eval()
 x = [torch.rand(3, 300, 400)]
 x = list(2 * x)

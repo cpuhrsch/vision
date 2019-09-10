@@ -466,6 +466,7 @@ class RoIHeads(torch.nn.Module):
         regression_targets = self.box_coder.encode(matched_gt_boxes, proposals)
         return proposals, matched_idxs, labels, regression_targets
 
+    # TODO: Next. Create copy for pure nt implementation and for reference.
     def postprocess_detections(self, class_logits, box_regression, proposals, image_shapes):
         device = class_logits.device
         num_classes = class_logits.shape[-1]
@@ -537,9 +538,12 @@ class RoIHeads(torch.nn.Module):
         if self.training:
             proposals, matched_idxs, labels, regression_targets = self.select_training_samples(proposals, targets)
 
-        box_features = self.box_roi_pool(features, proposals, image_shapes)
-        box_features = self.box_head(box_features)
+        nt_box_features, box_features = self.box_roi_pool(features, proposals, image_shapes)
+        box_features = self.box_head(nt_box_features)
+        # box_features = self.box_head(box_features)
         class_logits, box_regression = self.box_predictor(box_features)
+        import pdb
+        pdb.set_trace()
 
         result, losses = [], {}
         if self.training:
@@ -570,7 +574,7 @@ class RoIHeads(torch.nn.Module):
                     mask_proposals.append(proposals[img_id][pos])
                     pos_matched_idxs.append(matched_idxs[img_id][pos])
 
-            mask_features = self.mask_roi_pool(features, mask_proposals, image_shapes)
+            nt_mask_features, mask_features = self.mask_roi_pool(features, mask_proposals, image_shapes)
             mask_features = self.mask_head(mask_features)
             mask_logits = self.mask_predictor(mask_features)
 

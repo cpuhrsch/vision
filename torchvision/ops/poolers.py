@@ -137,15 +137,13 @@ class MultiScaleRoIAlign(nn.Module):
             self.setup_scales(x, image_shapes)
 
         if num_levels == 1:
-            return roi_align(
-                x[0], rois,
-                output_size=self.output_size,
-                spatial_scale=self.scales[0],
-                sampling_ratio=self.sampling_ratio
-            )
+            return roi_align(boxes,
+                             x[0], rois,
+                             output_size=self.output_size,
+                             spatial_scale=self.scales[0],
+                             sampling_ratio=self.sampling_ratio
+                             )
 
-        import pdb
-        pdb.set_trace()
         levels = self.map_levels(boxes)
 
         num_rois = len(rois)
