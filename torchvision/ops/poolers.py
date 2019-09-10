@@ -37,7 +37,10 @@ class LevelMapper(object):
         # Eqn.(1) in FPN paper
         target_lvls = torch.floor(self.lvl0 + torch.log2(s / self.s0 + self.eps))
         target_lvls = torch.clamp(target_lvls, min=self.k_min, max=self.k_max)
-        return target_lvls.to(torch.int64) - self.k_min
+        result = target_lvls.to(torch.int64) - self.k_min
+        import pdb
+        pdb.set_trace()
+        return result
 
 
 class MultiScaleRoIAlign(nn.Module):
@@ -141,6 +144,8 @@ class MultiScaleRoIAlign(nn.Module):
                 sampling_ratio=self.sampling_ratio
             )
 
+        import pdb
+        pdb.set_trace()
         levels = self.map_levels(boxes)
 
         num_rois = len(rois)
