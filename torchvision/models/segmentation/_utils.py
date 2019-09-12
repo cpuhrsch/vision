@@ -13,20 +13,22 @@ class _SimpleSegmentationModel(nn.Module):
         self.aux_classifier = aux_classifier
 
     def forward(self, x):
-        input_shape = x.shape[-2:]
+        input_shape = x.nested_size((2, 3))
         # contract: features is a dict of tensors
         features = self.backbone(x)
 
         result = OrderedDict()
         x = features["out"]
         x = self.classifier(x)
-        x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+        x = F.interpolate(x, size=input_shape,
+                          mode='bilinear', align_corners=False)
         result["out"] = x
 
         if self.aux_classifier is not None:
             x = features["aux"]
             x = self.aux_classifier(x)
-            x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+            x = F.interpolate(x, size=input_shape,
+                              mode='bilinear', align_corners=False)
             result["aux"] = x
 
         return result

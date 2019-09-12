@@ -34,7 +34,8 @@ class SmoothedValue(object):
         """
         if not is_dist_avail_and_initialized():
             return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
+        t = torch.tensor([self.count, self.total],
+                         dtype=torch.float64, device='cuda')
         dist.barrier()
         dist.all_reduce(t)
         t = t.tolist()
@@ -217,9 +218,10 @@ def cat_list(images, fill_value=0):
 
 def collate_fn(batch):
     images, targets = list(zip(*batch))
-    batched_imgs = cat_list(images, fill_value=0)
-    batched_targets = cat_list(targets, fill_value=255)
-    return batched_imgs, batched_targets
+    return torch.nested_tensor(images), torch.nested_tensor(targets)
+    # batched_imgs = cat_list(images, fill_value=0)
+    # batched_targets = cat_list(targets, fill_value=255)
+    # return batched_imgs, batched_targets
 
 
 def mkdir(path):
