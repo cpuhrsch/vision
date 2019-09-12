@@ -11,14 +11,17 @@ from coco_utils import get_coco
 import transforms as T
 import utils
 
+import nestedtensor
+torch = nestedtensor.nested.monkey_patch(torch)
+
 
 def get_dataset(name, image_set, transform):
     def sbd(*args, **kwargs):
         return torchvision.datasets.SBDataset(*args, mode='segmentation', **kwargs)
     paths = {
-        "voc": ('/datasets01/VOC/060817/', torchvision.datasets.VOCSegmentation, 21),
-        "voc_aug": ('/datasets01/SBDD/072318/', sbd, 21),
-        "coco": ('/datasets01/COCO/022719/', get_coco, 21)
+        "voc": ('/scratch/cpuhrsch/datasets/VOC/060817/', torchvision.datasets.VOCSegmentation, 21),
+        "voc_aug": ('/scratch/cpuhrsch/datasets/SBDD/072318/', sbd, 21),
+        "coco": ('/scratch/cpuhrsch/datasets/COCO/022719/', get_coco, 21)
     }
     p, ds_fn, num_classes = paths[name]
 
@@ -36,7 +39,6 @@ def get_transform(train):
     transforms.append(T.RandomResize(min_size, max_size))
     if train:
         transforms.append(T.RandomHorizontalFlip(0.5))
-        transforms.append(T.RandomCrop(crop_size))
     transforms.append(T.ToTensor())
     transforms.append(T.Normalize(mean=[0.485, 0.456, 0.406],
                                   std=[0.229, 0.224, 0.225]))
@@ -47,7 +49,7 @@ def get_transform(train):
 def criterion(inputs, target):
     losses = {}
     for name, x in inputs.items():
-        losses[name] = nn.functional.cross_entropy(x, target, ignore_index=255)
+        losses[name] = nn.functional.cross_entropy(x, target, ignore_index=255).sum()
 
     if len(losses) == 1:
         return losses['out']
