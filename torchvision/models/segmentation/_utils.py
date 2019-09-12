@@ -13,7 +13,7 @@ class _SimpleSegmentationModel(nn.Module):
         self.aux_classifier = aux_classifier
 
     def forward(self, x):
-        input_shape = x.shape[-2:]
+        input_shape = x.nested_size((2, 3))  # shape[-2:]
         # contract: features is a dict of tensors
         features = self.backbone(x)
 

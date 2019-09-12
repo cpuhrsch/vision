@@ -11,14 +11,19 @@ from coco_utils import get_coco
 import transforms as T
 import utils
 
+import random
+
+import nestedtensor
+torch = nestedtensor.nested.monkey_patch(torch)
+
 
 def get_dataset(name, image_set, transform):
     def sbd(*args, **kwargs):
         return torchvision.datasets.SBDataset(*args, mode='segmentation', **kwargs)
     paths = {
-        "voc": ('/datasets01/VOC/060817/', torchvision.datasets.VOCSegmentation, 21),
-        "voc_aug": ('/datasets01/SBDD/072318/', sbd, 21),
-        "coco": ('/datasets01/COCO/022719/', get_coco, 21)
+        "voc": ('/scratch/cpuhrsch/datasets/VOC/060817/', torchvision.datasets.VOCSegmentation, 21),
+        "voc_aug": ('/scratch/cpuhrsch/datasets/SBDD/072318/', sbd, 21),
+        "coco": ('/scratch/cpuhrsch/datasets/COCO/022719/', get_coco, 21)
     }
     p, ds_fn, num_classes = paths[name]
 
@@ -36,7 +41,7 @@ def get_transform(train):
     transforms.append(T.RandomResize(min_size, max_size))
     if train:
         transforms.append(T.RandomHorizontalFlip(0.5))
-        transforms.append(T.RandomCrop(crop_size))
+        # transforms.append(T.RandomCrop(crop_size))
     transforms.append(T.ToTensor())
     transforms.append(T.Normalize(mean=[0.485, 0.456, 0.406],
                                   std=[0.229, 0.224, 0.225]))
@@ -47,7 +52,8 @@ def get_transform(train):
 def criterion(inputs, target):
     losses = {}
     for name, x in inputs.items():
-        losses[name] = nn.functional.cross_entropy(x, target, ignore_index=255)
+        losses[name] = nn.functional.cross_entropy(
+            x, target, ignore_index=255).sum()
 
     if len(losses) == 1:
         return losses['out']
@@ -73,13 +79,13 @@ def evaluate(model, data_loader, device, num_classes):
     return confmat
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, print_freq):
+def train_one_epoch(model, criterion, optimizer, data_loader, len_dataset, lr_scheduler, device, epoch, print_freq):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter(
         'lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
     header = 'Epoch: [{}]'.format(epoch)
-    for image, target in metric_logger.log_every(data_loader, print_freq, header):
+    for image, target in metric_logger.log_every(data_loader, len_dataset, print_freq, header):
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
@@ -89,9 +95,23 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, devi
         optimizer.step()
 
         lr_scheduler.step()
+        import pdb
+        pdb.set_trace()
 
         metric_logger.update(
             loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
+
+
+def yield_batches(dataset, batch_size, shuffle=False):
+    inds = list(range(len(dataset)))
+    if shuffle:
+        random.shuffle(inds)
+    batches = [inds[i:i + batch_size] for i in range(0, len(inds), batch_size)]
+    for batch in batches:
+        data = [dataset[i] for i in batch]
+        image_batch = torch.nested_tensor([data_i[0] for data_i in data])
+        target_batch = torch.nested_tensor([data_i[1] for data_i in data])
+        yield image_batch, target_batch
 
 
 def main(args):
@@ -117,10 +137,12 @@ def main(args):
         train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.batch_size,
-        sampler=train_sampler, num_workers=args.workers,
-        collate_fn=utils.collate_fn, drop_last=True)
+    # data_loader = torch.utils.data.DataLoader(
+    #     dataset, batch_size=args.batch_size,
+    #     sampler=train_sampler, num_workers=args.workers,
+    #     collate_fn=utils.collate_fn, drop_last=True)
+
+    data_loader = yield_batches(dataset, args.batch_size, shuffle=True)
 
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, batch_size=1,
@@ -166,14 +188,14 @@ def main(args):
 
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        lambda x: (1 - x / (len(data_loader) * args.epochs)) ** 0.9)
+        lambda x: (1 - x / (len(dataset) * args.epochs)) ** 0.9)
 
     start_time = time.time()
     for epoch in range(args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader,
-                        lr_scheduler, device, epoch, args.print_freq)
+        train_one_epoch(model, criterion, optimizer, data_loader, len(
+            dataset), lr_scheduler, device, epoch, args.print_freq)
         confmat = evaluate(model, data_loader_test,
                            device=device, num_classes=num_classes)
         print(confmat)
