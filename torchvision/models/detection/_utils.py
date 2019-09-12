@@ -158,6 +158,8 @@ class BoxCoder(object):
         return targets
 
     def decode(self, rel_codes, boxes):
+        # import pdb
+        # pdb.set_trace()
         assert isinstance(boxes, (list, tuple))
         if isinstance(rel_codes, (list, tuple)):
             rel_codes = torch.cat(rel_codes, dim=0)
@@ -167,7 +169,51 @@ class BoxCoder(object):
         pred_boxes = self.decode_single(
             rel_codes.reshape(sum(boxes_per_image), -1), concat_boxes
         )
-        return pred_boxes.reshape(sum(boxes_per_image), -1, 4)
+        result = pred_boxes.reshape(sum(boxes_per_image), -1, 4)
+        return result
+
+        # (Pdb) p result.size()
+        # torch.Size([25500, 1, 4])
+        # (Pdb) p concat_boxes.size()
+        # torch.Size([25500, 4])
+        # (Pdb) p rel_codes.reshape(sum(boxes_per_image), -1).size()
+        # torch.Size([25500, 4])
+        # (Pdb) p rel_codes.size()
+        # torch.Size([25500, 4])
+
+    def nt_decode(self, rel_codes, boxes):
+
+        # (Pdb) p rel_codes.size()
+        # (1636, 8)
+        # (Pdb) p boxes.size()
+        # (2, 818, 4)
+        # assert isinstance(boxes, (list, tuple))
+        # if isinstance(rel_codes, (list, tuple)):
+        #     rel_codes = torch.cat(rel_codes, dim=0)
+        # assert isinstance(rel_codes, torch.Tensor)
+        # boxes_per_image = [len(b) for b in boxes]
+        # concat_boxes = torch.cat(boxes, dim=0)
+        # pred_boxes = self.decode_single(
+        #     rel_codes.reshape(sum(boxes_per_image), -1), concat_boxes
+        # )
+        # return pred_boxes.reshape(sum(boxes_per_image), -1, 4)
+        unfold_rel_codes = []
+        offset = 0
+        for s in boxes.nested_size(1):
+            unfold_rel_codes.append(rel_codes[offset:offset + s])
+            offset += s
+        nt_rel_codes = torch.as_nested_tensor(unfold_rel_codes)
+        result = []
+        for i in range(nt_rel_codes.size(0)):
+            result_i = []
+            for j in range(nt_rel_codes.size(1)):
+                result_i.append(self.decode_single_single(nt_rel_codes[i][j], boxes[i][j]))
+            result.append(result_i)
+        import pdb
+        pdb.set_trace()
+        result = torch.as_nested_tensor(result)
+        print(result.size())
+        return result
 
     def decode_single(self, rel_codes, boxes):
         """
@@ -212,6 +258,50 @@ class BoxCoder(object):
         pred_boxes[:, 3::4] = pred_ctr_y + 0.5 * pred_h
 
         return pred_boxes
+
+    def decode_single_single(self, rel_code, box):
+        """
+        From a set of original boxes and encoded relative box offsets,
+        get the decoded boxes.
+
+        Arguments:
+            rel_code (Tensor): encoded box
+            box (Tensor): reference box
+        """
+
+        box = box.to(rel_code.dtype)
+
+        widths = box[2] - box[0]
+        heights = box[3] - box[1]
+        ctr_x = box[0] + 0.5 * widths
+        ctr_y = box[1] + 0.5 * heights
+
+        wx, wy, ww, wh = self.weights
+        dx = rel_code[0::4] / wx
+        dy = rel_code[1::4] / wy
+        dw = rel_code[2::4] / ww
+        dh = rel_code[3::4] / wh
+
+        # Prevent sending too large values into torch.exp()
+        dw = torch.clamp(dw, max=self.bbox_xform_clip)
+        dh = torch.clamp(dh, max=self.bbox_xform_clip)
+
+        pred_ctr_x = dx * widths[None] + ctr_x[None]
+        pred_ctr_y = dy * heights[None] + ctr_y[None]
+        pred_w = torch.exp(dw) * widths[None]
+        pred_h = torch.exp(dh) * heights[None]
+
+        pred_box = torch.zeros_like(rel_code)
+        # x1
+        pred_box[0::4] = pred_ctr_x - 0.5 * pred_w
+        # y1
+        pred_box[1::4] = pred_ctr_y - 0.5 * pred_h
+        # x2
+        pred_box[2::4] = pred_ctr_x + 0.5 * pred_w
+        # y2
+        pred_box[3::4] = pred_ctr_y + 0.5 * pred_h
+
+        return pred_box
 
 
 class Matcher(object):

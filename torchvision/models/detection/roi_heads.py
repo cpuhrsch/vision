@@ -469,12 +469,16 @@ class RoIHeads(torch.nn.Module):
     # TODO: Next. Create copy for pure nt implementation and for reference.
     def postprocess_detections(self, class_logits, box_regression, proposals, image_shapes):
         device = class_logits.device
-        num_classes = class_logits.shape[-1]
+        num_classes = class_logits.size()[-1]
 
-        boxes_per_image = [len(boxes_in_image) for boxes_in_image in proposals]
-        pred_boxes = self.box_coder.decode(box_regression, proposals)
+        # boxes_per_image = [len(boxes_in_image) for boxes_in_image in proposals]
+        proposals = torch.as_nested_tensor(proposals)
+        pred_boxes = self.box_coder.nt_decode(box_regression, proposals)
 
         pred_scores = F.softmax(class_logits, -1)
+
+        import pdb
+        pdb.set_trace()
 
         # split boxes and scores per image
         pred_boxes = pred_boxes.split(boxes_per_image, 0)
@@ -541,9 +545,9 @@ class RoIHeads(torch.nn.Module):
         nt_box_features, box_features = self.box_roi_pool(features, proposals, image_shapes)
         box_features = self.box_head(nt_box_features)
         # box_features = self.box_head(box_features)
+        # import pdb
+        # pdb.set_trace()
         class_logits, box_regression = self.box_predictor(box_features)
-        import pdb
-        pdb.set_trace()
 
         result, losses = [], {}
         if self.training:

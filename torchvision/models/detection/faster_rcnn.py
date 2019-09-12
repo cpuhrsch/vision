@@ -276,6 +276,8 @@ class FastRCNNPredictor(nn.Module):
         if torch.is_tensor(x):
             if x.ndimension() == 4:
                 assert list(x.shape[2:]) == [1, 1]
+        # import pdb
+        # pdb.set_trace()
         x = x.flatten(start_dim=1)
         scores = self.cls_score(x)
         bbox_deltas = self.bbox_pred(x)
