@@ -61,18 +61,19 @@ def criterion(inputs, target):
     return losses['out'] + 0.5 * losses['aux']
 
 
-def evaluate(model, data_loader, device, num_classes):
+def evaluate(model, data_loader, len_dataset, device, num_classes, print_freq=1):
     model.eval()
     confmat = utils.ConfusionMatrix(num_classes)
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
     with torch.no_grad():
-        for image, target in metric_logger.log_every(data_loader, 100, header):
+        for image, target in metric_logger.log_every(data_loader, len_dataset, print_freq, header):
             image, target = image.to(device), target.to(device)
             output = model(image)
             output = output['out']
-
-            confmat.update(target.flatten(), output.argmax(1).flatten())
+            output_argmax = output.argmax(1)
+            for t, o in zip(target.flatten(), output_argmax.flatten()):
+                confmat.update(t, o)
 
         confmat.reduce_from_all_processes()
 
@@ -95,8 +96,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, len_dataset, lr_sc
         optimizer.step()
 
         lr_scheduler.step()
-        import pdb
-        pdb.set_trace()
 
         metric_logger.update(
             loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
@@ -144,10 +143,13 @@ def main(args):
 
     data_loader = yield_batches(dataset, args.batch_size, shuffle=True)
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=1,
-        sampler=test_sampler, num_workers=args.workers,
-        collate_fn=utils.collate_fn)
+    # data_loader_test = torch.utils.data.DataLoader(
+    #     dataset_test, batch_size=1,
+    #     sampler=test_sampler, num_workers=args.workers,
+    #     collate_fn=utils.collate_fn)
+
+    data_loader_test = yield_batches(
+        dataset_test, args.batch_size, shuffle=False)
 
     model = torchvision.models.segmentation.__dict__[args.model](num_classes=num_classes,
                                                                  aux_loss=args.aux_loss,
@@ -167,8 +169,8 @@ def main(args):
         model_without_ddp = model.module
 
     if args.test_only:
-        confmat = evaluate(model, data_loader_test,
-                           device=device, num_classes=num_classes)
+        confmat = evaluate(model, data_loader_test, len(dataset_test) / args.batch_size,
+                           device=device, num_classes=num_classes, print_freq=args.print_freq)
         print(confmat)
         return
 
@@ -196,8 +198,8 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, len(
             dataset), lr_scheduler, device, epoch, args.print_freq)
-        confmat = evaluate(model, data_loader_test,
-                           device=device, num_classes=num_classes)
+        confmat = evaluate(model, data_loader_test, len(dataset_test),
+                           device=device, num_classes=num_classes, print_freq=args.print_freq)
         print(confmat)
         utils.save_on_master(
             {
