@@ -76,7 +76,8 @@ def evaluate(model, data_loader, device, num_classes):
 def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, print_freq):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
+    metric_logger.add_meter(
+        'lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
     header = 'Epoch: [{}]'.format(epoch)
     for image, target in metric_logger.log_every(data_loader, print_freq, header):
         image, target = image.to(device), target.to(device)
@@ -89,7 +90,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, devi
 
         lr_scheduler.step()
 
-        metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(
+            loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
 
 
 def main(args):
@@ -101,12 +103,16 @@ def main(args):
 
     device = torch.device(args.device)
 
-    dataset, num_classes = get_dataset(args.dataset, "train", get_transform(train=True))
-    dataset_test, _ = get_dataset(args.dataset, "val", get_transform(train=False))
+    dataset, num_classes = get_dataset(
+        args.dataset, "train", get_transform(train=True))
+    dataset_test, _ = get_dataset(
+        args.dataset, "val", get_transform(train=False))
 
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-        test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset_test)
     else:
         train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
@@ -134,20 +140,25 @@ def main(args):
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
     if args.test_only:
-        confmat = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
+        confmat = evaluate(model, data_loader_test,
+                           device=device, num_classes=num_classes)
         print(confmat)
         return
 
     params_to_optimize = [
-        {"params": [p for p in model_without_ddp.backbone.parameters() if p.requires_grad]},
-        {"params": [p for p in model_without_ddp.classifier.parameters() if p.requires_grad]},
+        {"params": [p for p in model_without_ddp.backbone.parameters()
+                    if p.requires_grad]},
+        {"params": [p for p in model_without_ddp.classifier.parameters()
+                    if p.requires_grad]},
     ]
     if args.aux_loss:
-        params = [p for p in model_without_ddp.aux_classifier.parameters() if p.requires_grad]
+        params = [p for p in model_without_ddp.aux_classifier.parameters()
+                  if p.requires_grad]
         params_to_optimize.append({"params": params, "lr": args.lr * 10})
     optimizer = torch.optim.SGD(
         params_to_optimize,
@@ -161,8 +172,10 @@ def main(args):
     for epoch in range(args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, args.print_freq)
-        confmat = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
+        train_one_epoch(model, criterion, optimizer, data_loader,
+                        lr_scheduler, device, epoch, args.print_freq)
+        confmat = evaluate(model, data_loader_test,
+                           device=device, num_classes=num_classes)
         print(confmat)
         utils.save_on_master(
             {
@@ -180,11 +193,13 @@ def main(args):
 
 def parse_args():
     import argparse
-    parser = argparse.ArgumentParser(description='PyTorch Segmentation Training')
+    parser = argparse.ArgumentParser(
+        description='PyTorch Segmentation Training')
 
     parser.add_argument('--dataset', default='voc', help='dataset')
     parser.add_argument('--model', default='fcn_resnet101', help='model')
-    parser.add_argument('--aux-loss', action='store_true', help='auxiliar loss')
+    parser.add_argument('--aux-loss', action='store_true',
+                        help='auxiliar loss')
     parser.add_argument('--device', default='cuda', help='device')
     parser.add_argument('-b', '--batch-size', default=8, type=int)
     parser.add_argument('--epochs', default=30, type=int, metavar='N',
@@ -192,13 +207,15 @@ def parse_args():
 
     parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
                         help='number of data loading workers (default: 16)')
-    parser.add_argument('--lr', default=0.01, type=float, help='initial learning rate')
+    parser.add_argument('--lr', default=0.01, type=float,
+                        help='initial learning rate')
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
     parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                         metavar='W', help='weight decay (default: 1e-4)',
                         dest='weight_decay')
-    parser.add_argument('--print-freq', default=10, type=int, help='print frequency')
+    parser.add_argument('--print-freq', default=10,
+                        type=int, help='print frequency')
     parser.add_argument('--output-dir', default='.', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument(
@@ -216,7 +233,8 @@ def parse_args():
     # distributed training parameters
     parser.add_argument('--world-size', default=1, type=int,
                         help='number of distributed processes')
-    parser.add_argument('--dist-url', default='env://', help='url used to set up distributed training')
+    parser.add_argument('--dist-url', default='env://',
+                        help='url used to set up distributed training')
 
     args = parser.parse_args()
     return args
