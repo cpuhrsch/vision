@@ -57,18 +57,19 @@ def criterion(inputs, target):
     return losses['out'] + 0.5 * losses['aux']
 
 
-def evaluate(model, data_loader, device, num_classes):
+def evaluate(model, data_loader, device, num_classes, print_freq=100):
     model.eval()
     confmat = utils.ConfusionMatrix(num_classes)
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
     with torch.no_grad():
-        for image, target in metric_logger.log_every(data_loader, 100, header):
+        for image, target in metric_logger.log_every(data_loader, print_freq, header):
             image, target = image.to(device), target.to(device)
             output = model(image)
             output = output['out']
-
-            confmat.update(target.flatten(), output.argmax(1).flatten())
+            output_argmax = output.argmax(1)
+            for t, o in zip(target.flatten(), output_argmax.flatten()):
+                confmat.update(t, o)
 
         confmat.reduce_from_all_processes()
 
@@ -119,7 +120,7 @@ def main(args):
         collate_fn=utils.collate_fn, drop_last=True)
 
     data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=1,
+        dataset_test, batch_size=args.batch_size,
         sampler=test_sampler, num_workers=args.workers,
         collate_fn=utils.collate_fn)
 
@@ -140,7 +141,7 @@ def main(args):
         model_without_ddp = model.module
 
     if args.test_only:
-        confmat = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
+        confmat = evaluate(model, data_loader_test, device=device, num_classes=num_classes, print_freq=args.print_freq)
         print(confmat)
         return
 
@@ -164,7 +165,7 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, device, epoch, args.print_freq)
-        confmat = evaluate(model, data_loader_test, device=device, num_classes=num_classes)
+        confmat = evaluate(model, data_loader_test, device=device, num_classes=num_classes, print_freq=args.print_freq)
         print(confmat)
         utils.save_on_master(
             {
