@@ -68,8 +68,7 @@ def evaluate(model, data_loader, device, num_classes, print_freq=100):
             output = model(image)
             output = output['out']
             output_argmax = output.argmax(1)
-            for t, o in zip(target.flatten(), output_argmax.flatten()):
-                confmat.update(t, o)
+            confmat.nested_update(target, output_argmax)
 
         confmat.reduce_from_all_processes()
 

@@ -86,6 +86,10 @@ class ConfusionMatrix(object):
             inds = n * a[k].to(torch.int64) + b[k]
             self.mat += torch.bincount(inds, minlength=n**2).reshape(n, n)
 
+    def nested_update(self, na, nb):
+        for a, b in zip(na.unbind(), nb.unbind()):
+            self.update(a, b)
+
     def reset(self):
         self.mat.zero_()
 
