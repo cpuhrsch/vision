@@ -7,6 +7,8 @@ from collections import OrderedDict
 import torch
 from torch import nn
 
+from nestedtensor import torch
+
 
 class GeneralizedRCNN(nn.Module):
     """
@@ -44,11 +46,15 @@ class GeneralizedRCNN(nn.Module):
         if self.training and targets is None:
             raise ValueError("In training mode, targets should be passed")
         original_image_sizes = [img.shape[-2:] for img in images]
-        images, targets = self.transform(images, targets)
-        features = self.backbone(images.tensors)
+        results = [self.transform([images[i]], [targets[i]]) for i in range(len(images))]
+        images_tensors = torch.nested_tensor([results[i][0].tensors for i in range(len(results))])
+        images_, targets_ = self.transform(images, targets)
+        features = self.backbone(images_tensors)
+        features_ = self.backbone(images_.tensors)
         if isinstance(features, torch.Tensor):
             features = OrderedDict([(0, features)])
-        proposals, proposal_losses = self.rpn(images, features, targets)
+        proposals, proposal_losses = self.rpn(images_, features_, targets_)
+        import pdb; pdb.set_trace()
         detections, detector_losses = self.roi_heads(features, proposals, images.image_sizes, targets)
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
 

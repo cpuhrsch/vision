@@ -89,7 +89,10 @@ class FeaturePyramidNetwork(nn.Module):
             if not inner_block:
                 continue
             inner_lateral = inner_block(feature)
-            feat_shape = inner_lateral.shape[-2:]
+            if torch.is_tensor(inner_lateral):
+                feat_shape = inner_lateral.shape[-2:]
+            else:
+                feat_shape = inner_lateral.nested_size((3, 4))
             inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
             last_inner = inner_lateral + inner_top_down
             results.insert(0, layer_block(last_inner))
