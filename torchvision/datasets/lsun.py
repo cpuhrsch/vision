@@ -5,7 +5,11 @@ import os.path
 import six
 import string
 import sys
-from collections import Iterable
+
+if sys.version_info < (3, 3):
+    from collections import Iterable
+else:
+    from collections.abc import Iterable
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -58,7 +62,7 @@ class LSUNClass(VisionDataset):
 
 class LSUN(VisionDataset):
     """
-    `LSUN <http://lsun.cs.princeton.edu>`_ dataset.
+    `LSUN <https://www.yf.io/p/lsun>`_ dataset.
 
     Args:
         root (string): Root directory for the database files.

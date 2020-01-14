@@ -1,3 +1,4 @@
+import sys
 import os
 import unittest
 import mock
@@ -107,14 +108,14 @@ class Tester(unittest.TestCase):
             img, target = dataset[0]
             self.assertEqual(dataset.class_to_idx[dataset.classes[0]], target)
 
-    @mock.patch('torchvision.datasets.utils.download_url')
+    @mock.patch('torchvision.datasets.imagenet._verify_archive')
     @unittest.skipIf(not HAS_SCIPY, "scipy unavailable")
-    def test_imagenet(self, mock_download):
+    def test_imagenet(self, mock_verify):
         with imagenet_root() as root:
-            dataset = torchvision.datasets.ImageNet(root, split='train', download=True)
+            dataset = torchvision.datasets.ImageNet(root, split='train')
             self.generic_classification_dataset_test(dataset)
 
-            dataset = torchvision.datasets.ImageNet(root, split='val', download=True)
+            dataset = torchvision.datasets.ImageNet(root, split='val')
             self.generic_classification_dataset_test(dataset)
 
     @mock.patch('torchvision.datasets.cifar.check_integrity')
@@ -149,6 +150,7 @@ class Tester(unittest.TestCase):
             img, target = dataset[0]
             self.assertEqual(dataset.class_to_idx[dataset.classes[0]], target)
 
+    @unittest.skipIf('win' in sys.platform, 'temporarily disabled on Windows')
     def test_cityscapes(self):
         with cityscapes_root() as root:
 

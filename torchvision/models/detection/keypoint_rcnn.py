@@ -2,6 +2,7 @@ import torch
 from torch import nn
 
 from torchvision.ops import misc as misc_nn_ops
+
 from torchvision.ops import MultiScaleRoIAlign
 
 from ..utils import load_state_dict_from_url
@@ -179,7 +180,7 @@ class KeypointRCNN(FasterRCNN):
 
         if keypoint_roi_pool is None:
             keypoint_roi_pool = MultiScaleRoIAlign(
-                featmap_names=[0, 1, 2, 3],
+                featmap_names=['0', '1', '2', '3'],
                 output_size=14,
                 sampling_ratio=2)
 
@@ -252,14 +253,17 @@ class KeypointRCNNPredictor(nn.Module):
     def forward(self, x):
         x = self.kps_score_lowres(x)
         x = misc_nn_ops.interpolate(
-            x, scale_factor=self.up_scale, mode="bilinear", align_corners=False
+            x, scale_factor=float(self.up_scale), mode="bilinear", align_corners=False
         )
         return x
 
 
 model_urls = {
-    'keypointrcnn_resnet50_fpn_coco':
+    # legacy model for BC reasons, see https://github.com/pytorch/vision/issues/1606
+    'keypointrcnn_resnet50_fpn_coco_legacy':
         'https://download.pytorch.org/models/keypointrcnn_resnet50_fpn_coco-9f466800.pth',
+    'keypointrcnn_resnet50_fpn_coco':
+        'https://download.pytorch.org/models/keypointrcnn_resnet50_fpn_coco-fc266e95.pth',
 }
 
 
@@ -311,7 +315,10 @@ def keypointrcnn_resnet50_fpn(pretrained=False, progress=True,
     backbone = resnet_fpn_backbone('resnet50', pretrained_backbone)
     model = KeypointRCNN(backbone, num_classes, num_keypoints=num_keypoints, **kwargs)
     if pretrained:
-        state_dict = load_state_dict_from_url(model_urls['keypointrcnn_resnet50_fpn_coco'],
+        key = 'keypointrcnn_resnet50_fpn_coco'
+        if pretrained == 'legacy':
+            key += '_legacy'
+        state_dict = load_state_dict_from_url(model_urls[key],
                                               progress=progress)
         model.load_state_dict(state_dict)
     return model

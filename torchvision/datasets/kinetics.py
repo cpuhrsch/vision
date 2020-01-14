@@ -1,6 +1,6 @@
-from .video_utils import VideoClips
 from .utils import list_dir
 from .folder import make_dataset
+from .video_utils import VideoClips
 from .vision import VisionDataset
 
 
@@ -36,17 +36,35 @@ class Kinetics400(VisionDataset):
         label (int): class of the video clip
     """
 
-    def __init__(self, root, frames_per_clip, step_between_clips=1, transform=None):
+    def __init__(self, root, frames_per_clip, step_between_clips=1, frame_rate=None,
+                 extensions=('avi',), transform=None, _precomputed_metadata=None,
+                 num_workers=1, _video_width=0, _video_height=0,
+                 _video_min_dimension=0, _audio_samples=0, _audio_channels=0):
         super(Kinetics400, self).__init__(root)
-        extensions = ('avi',)
 
         classes = list(sorted(list_dir(root)))
         class_to_idx = {classes[i]: i for i in range(len(classes))}
         self.samples = make_dataset(self.root, class_to_idx, extensions, is_valid_file=None)
         self.classes = classes
         video_list = [x[0] for x in self.samples]
-        self.video_clips = VideoClips(video_list, frames_per_clip, step_between_clips)
+        self.video_clips = VideoClips(
+            video_list,
+            frames_per_clip,
+            step_between_clips,
+            frame_rate,
+            _precomputed_metadata,
+            num_workers=num_workers,
+            _video_width=_video_width,
+            _video_height=_video_height,
+            _video_min_dimension=_video_min_dimension,
+            _audio_samples=_audio_samples,
+            _audio_channels=_audio_channels,
+        )
         self.transform = transform
+
+    @property
+    def metadata(self):
+        return self.video_clips.metadata
 
     def __len__(self):
         return self.video_clips.num_clips()
