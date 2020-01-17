@@ -5,6 +5,7 @@ import math
 import time
 import torch
 import torch.distributed as dist
+import nestedtensor
 
 import errno
 import os
@@ -221,7 +222,7 @@ def cat_list(images, fill_value=0):
 
 def collate_fn(batch):
     images, targets = list(zip(*batch))
-    return torch.nested_tensor(images), torch.nested_tensor(targets)
+    return nestedtensor.nested_tensor(images), nestedtensor.nested_tensor(targets)
 
 
 def mkdir(path):
